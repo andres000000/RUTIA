@@ -164,3 +164,21 @@ def test_generate_history_and_train_produce_usable_models(db_session, tmp_path, 
     # anomalía por el modelo recién entrenado con ese mismo histórico.
     assert predict.evaluate_speed_anomaly(95.0).severity == AlertSeverity.HIGH
     assert predict.evaluate_speed_anomaly(28.0) is None
+
+
+def test_model_summary_is_admin_only_and_describes_both_models(client):
+    from app.ml.summary import clear_summary_cache
+    from tests.test_auth_and_crud import _bootstrap_tenant, _login
+
+    clear_summary_cache()
+    _bootstrap_tenant(client)
+    headers = {"Authorization": f"Bearer {_login(client, 'admin@test.edu.co', 'clave1234')}"}
+
+    resp = client.get("/api/v1/ml/summary", headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["delay_model"]["algorithm"].startswith("Random Forest")
+    assert body["anomaly_model"]["algorithm"].startswith("Isolation Forest")
+    # Sin histórico en la base de pruebas no se inventan métricas.
+    assert body["delay_model"]["metrics"] is None
+    assert client.get("/api/v1/ml/summary").status_code == 401
