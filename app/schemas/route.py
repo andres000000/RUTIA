@@ -66,6 +66,8 @@ class StopRead(BaseModel):
     geofence_radius_m: int
     lon: float
     lat: float
+    # No NULL = parada "de casa" de ese estudiante (creada desde su dirección).
+    student_id: int | None = None
 
 
 class RouteCreate(BaseModel):

@@ -40,6 +40,16 @@ class Stop(TenantMixin, TimestampMixin, Base):
     # Ubicación de la parada (Point en WGS84 / SRID 4326).
     geom: Mapped[object] = mapped_column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
     geofence_radius_m: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    # Si no es NULL, esta es la parada "de casa" de ese estudiante: se creó a
+    # partir de su dirección y se mueve/borra junto con él. Las paradas
+    # compartidas (un parque, el colegio) lo tienen en NULL. Se borra en
+    # cascada al borrar el estudiante.
+    student_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("students.id", ondelete="CASCADE", use_alter=True, name="fk_stops_student_id_students"),
+        nullable=True,
+        index=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Stop id={self.id} name={self.name!r} route_id={self.route_id}>"

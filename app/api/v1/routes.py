@@ -46,6 +46,7 @@ def _stop_to_read(stop: Stop) -> StopRead:
         geofence_radius_m=stop.geofence_radius_m,
         lon=point.x,
         lat=point.y,
+        student_id=stop.student_id,
     )
 
 

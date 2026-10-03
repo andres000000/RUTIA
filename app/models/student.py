@@ -22,6 +22,10 @@ class Student(TenantMixin, TimestampMixin, Base):
     stop_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("stops.id", ondelete="SET NULL"), nullable=True
     )
+    # Dirección de la casa, tal como la escribe el admin. Su ubicación en el
+    # mapa vive en la parada "de casa" del estudiante (Stop.student_id), que es
+    # la que se integra al recorrido de la ruta.
+    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     def __repr__(self) -> str:
