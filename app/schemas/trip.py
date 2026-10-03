@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.models.trip import TripStatus
+from app.schemas.route import RoutePathRead
 
 
 class TripCreate(BaseModel):
@@ -46,3 +47,26 @@ class TripEtaRead(BaseModel):
     # mediana de viajes pasados de esa ruta (sin modelo entrenado todavía);
     # "heuristic_default" = ni modelo ni histórico disponible.
     source: str
+
+
+class TripTrackRead(BaseModel):
+    """Recorrido real grabado de un viaje, junto al trazado planeado de su ruta.
+
+    `coordinates` va en orden [lon, lat] (GeoJSON), igual que el trazado
+    planeado, y viene reducido a unos cientos de puntos para dibujarlo rápido;
+    las métricas sí se calculan con todas las posiciones grabadas."""
+
+    trip_id: int
+    route_id: int
+    status: TripStatus
+    coordinates: list[list[float]]
+    point_count: int
+    distance_m: float
+    duration_minutes: float | None = None
+    avg_speed_kmh: float | None = None
+    max_speed_kmh: float | None = None
+    # % de posiciones a más de `off_route_threshold_m` del trazado planeado.
+    # None si no hay trazado planeado o no hay posiciones con qué comparar.
+    off_route_pct: float | None = None
+    off_route_threshold_m: float
+    planned: RoutePathRead

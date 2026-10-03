@@ -261,17 +261,11 @@ def delete_stop(
     db.commit()
 
 
-@router.get("/{route_id}/path", response_model=RoutePathRead)
-def get_route_path(
-    route_id: int,
-    db: Session = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id),
-) -> RoutePathRead:
-    """Trazado para dibujar en el mapa. Abierto a todos los roles del colegio
-    (lectura), igual que las paradas."""
-    route = _get_owned_route(db, tenant_id, route_id)
+def build_route_path(db: Session, route: Route) -> RoutePathRead:
+    """Trazado planeado de la ruta. Lo comparten `GET .../path` y el recorrido
+    de un viaje (`GET /trips/{id}/track`), que lo dibuja junto al real."""
     if route.geom is None:
-        stops = _ordered_stops(db, tenant_id, route_id)
+        stops = _ordered_stops(db, route.tenant_id, route.id)
         if len(stops) < 2:
             return RoutePathRead(route_id=route.id, coordinates=[], distance_m=0.0, source="none")
         # Rutas creadas antes de esta función (o cuando OSRM estaba caído)
@@ -293,6 +287,17 @@ def get_route_path(
         distance_m=round(polyline_length_m(coords), 1),
         source="osrm",
     )
+
+
+@router.get("/{route_id}/path", response_model=RoutePathRead)
+def get_route_path(
+    route_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant_id),
+) -> RoutePathRead:
+    """Trazado para dibujar en el mapa. Abierto a todos los roles del colegio
+    (lectura), igual que las paradas."""
+    return build_route_path(db, _get_owned_route(db, tenant_id, route_id))
 
 
 @router.get("/{route_id}/optimization", response_model=RouteOptimizationRead)

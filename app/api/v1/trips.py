@@ -1,10 +1,13 @@
+import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from geoalchemy2.shape import to_shape
+from shapely.geometry import LineString, Point
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_tenant_id, require_roles
+from app.api.v1.routes import build_route_path
 from app.core.database import get_db
 from app.ml.predict import predict_trip_duration_minutes
 from app.models.gps_position import GPSPosition
@@ -12,9 +15,20 @@ from app.models.route import Route
 from app.models.trip import Trip, TripStatus
 from app.models.user import Role, User
 from app.models.vehicle import Vehicle
-from app.schemas.trip import GPSPositionRead, TripCreate, TripEtaRead, TripRead
+from app.schemas.trip import GPSPositionRead, TripCreate, TripEtaRead, TripRead, TripTrackRead
+from app.services.routing import haversine_m
 
 router = APIRouter(prefix="/trips", tags=["trips"])
+
+# Más lejos que esto del trazado planeado cuenta como "fuera de ruta". Holgado
+# a propósito: el GPS de un celular tiene errores de 10-30 m y una calle
+# paralela queda a ~80-100 m en el centro de Bucaramanga.
+OFF_ROUTE_THRESHOLD_M = 120.0
+# Un salto entre dos posiciones seguidas que implique más de esto es un error
+# del GPS (no el bus): no se suma a la distancia recorrida.
+GPS_GLITCH_SPEED_KMH = 150.0
+# Puntos máximos del recorrido que se mandan para dibujar.
+MAX_TRACK_POINTS = 400
 
 
 def _get_owned_trip(db: Session, tenant_id: int, trip_id: int) -> Trip:
@@ -195,3 +209,92 @@ def list_positions(
             )
         )
     return result
+
+
+def _to_local_meters(lon: float, lat: float, ref_lat: float) -> tuple[float, float]:
+    """Proyección plana aproximada (equirectangular) en metros. Para distancias
+    de una ciudad el error es despreciable y evita depender de PostGIS aquí."""
+    return (lon * 111_320 * math.cos(math.radians(ref_lat)), lat * 110_540)
+
+
+def _downsample(coords: list[tuple[float, float]], limit: int) -> list[tuple[float, float]]:
+    if len(coords) <= limit:
+        return coords
+    step = math.ceil(len(coords) / limit)
+    sampled = coords[::step]
+    if sampled[-1] != coords[-1]:
+        sampled.append(coords[-1])  # el punto final siempre se dibuja
+    return sampled
+
+
+@router.get("/{trip_id}/track", response_model=TripTrackRead)
+def get_trip_track(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant_id),
+    _user=Depends(require_roles(Role.ADMIN, Role.MONITOR, Role.CONDUCTOR)),
+) -> TripTrackRead:
+    """Recorrido real vs. planeado de un viaje (panel admin e Historial del
+    monitor/conductor). El PADRE queda fuera a propósito: en la app solo ve
+    su propia parada y el bus, no el recorrido completo de la ruta.
+
+    Ojo: el trazado planeado es el de la ruta HOY; si el admin cambió las
+    paradas después del viaje, la comparación es contra la ruta nueva."""
+    trip = _get_owned_trip(db, tenant_id, trip_id)
+    route = db.query(Route).filter(Route.id == trip.route_id, Route.tenant_id == tenant_id).first()
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ruta no encontrada")
+    planned = build_route_path(db, route)
+
+    positions = (
+        db.query(GPSPosition)
+        .filter(GPSPosition.trip_id == trip.id)
+        .order_by(GPSPosition.recorded_at)
+        .all()
+    )
+    coords: list[tuple[float, float]] = []
+    for p in positions:
+        point = to_shape(p.geom)
+        coords.append((point.x, point.y))
+
+    distance_m = 0.0
+    for prev, curr, a, b in zip(positions, positions[1:], coords, coords[1:]):
+        step_m = haversine_m(a, b)
+        seconds = (curr.recorded_at - prev.recorded_at).total_seconds()
+        if seconds > 0 and step_m / seconds * 3.6 > GPS_GLITCH_SPEED_KMH:
+            continue
+        distance_m += step_m
+
+    duration_minutes = None
+    avg_speed_kmh = None
+    if len(positions) >= 2:
+        seconds = (positions[-1].recorded_at - positions[0].recorded_at).total_seconds()
+        duration_minutes = round(seconds / 60, 1)
+        if seconds > 0:
+            avg_speed_kmh = round(distance_m / seconds * 3.6, 1)
+    speeds = [p.speed_kmh for p in positions if p.speed_kmh is not None]
+    max_speed_kmh = round(max(speeds), 1) if speeds else None
+
+    off_route_pct = None
+    if coords and len(planned.coordinates) >= 2:
+        ref_lat = coords[0][1]
+        line = LineString([_to_local_meters(lon, lat, ref_lat) for lon, lat in planned.coordinates])
+        off = sum(
+            1 for lon, lat in coords if line.distance(Point(_to_local_meters(lon, lat, ref_lat))) > OFF_ROUTE_THRESHOLD_M
+        )
+        off_route_pct = round(off / len(coords) * 100, 1)
+
+    return TripTrackRead(
+        trip_id=trip.id,
+        route_id=route.id,
+        status=trip.status,
+        coordinates=[[lon, lat] for lon, lat in _downsample(coords, MAX_TRACK_POINTS)],
+        point_count=len(positions),
+        distance_m=round(distance_m, 1),
+        duration_minutes=duration_minutes,
+        avg_speed_kmh=avg_speed_kmh,
+        max_speed_kmh=max_speed_kmh,
+        off_route_pct=off_route_pct,
+        off_route_threshold_m=OFF_ROUTE_THRESHOLD_M,
+        planned=planned,
+    )
