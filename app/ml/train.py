@@ -1,6 +1,8 @@
 """
 Entrena los dos modelos del Objetivo 4 y los guarda en disco:
 
+(Los dos primeros; el tercero, ETA por parada, vive en `stop_eta.py`.)
+
 1. **Modelo de retrasos** (regresión): predice cuántos minutos debería durar
    un viaje de una ruta dada, según el día de la semana y la hora de salida.
    Se usa en `GET /api/v1/trips/{id}/eta`.
@@ -31,6 +33,7 @@ from app.models.gps_position import GPSPosition
 from app.models.tenant import Tenant
 from app.models.trip import Trip, TripStatus
 from app.ml import generate_history
+from app.ml.stop_eta import train_stop_eta_model
 from app.ml.paths import ANOMALY_MODEL_PATH, DELAY_MODEL_PATH
 
 # Si un colegio tiene menos viajes completados que esto, se le rellena el
@@ -117,6 +120,9 @@ def main() -> None:
         print()
         print("Entrenando modelo de detección de anomalías...")
         train_anomaly_model(db)
+        print()
+        print("Entrenando modelo de ETA por parada...")
+        train_stop_eta_model(db)
         print()
         print("Listo. Los modelos quedaron guardados en app/ml/trained_models/.")
     finally:

@@ -1,5 +1,5 @@
 """
-Ficha técnica de los modelos del Objetivo 4, para la sección "Modelo" y el
+Ficha técnica de los modelos del Objetivo 4 (duración, anomalías y ETA por parada), para la sección "Modelo" y el
 reporte PDF del panel admin.
 
 Las métricas se calculan en el momento sobre los datos actuales (no se
@@ -31,6 +31,7 @@ from sklearn.metrics import f1_score, mean_absolute_error, mean_squared_error, p
 from sklearn.model_selection import KFold, cross_val_predict
 from sqlalchemy.orm import Session
 
+from app.ml import stop_eta
 from app.ml.paths import ANOMALY_MODEL_PATH, DELAY_MODEL_PATH
 from app.ml.predict import HIGH_SPEED_THRESHOLD_KMH
 from app.models.gps_position import GPSPosition
@@ -153,6 +154,33 @@ def _anomaly_section(db: Session) -> dict[str, Any]:
     return section
 
 
+def _stop_eta_section() -> dict[str, Any]:
+    """A diferencia de los otros dos, este modelo guarda su ficha (y sus
+    métricas de validación cruzada) al entrenar: rehacer su conjunto de datos
+    aquí implica recorrer todo el GPS histórico y simular viajes."""
+    bundle = stop_eta.current_bundle()
+    section: dict[str, Any] = {
+        "available": bundle is not None,
+        "name": "Llegada estimada a cada parada (ETA por parada)",
+        "algorithm": "Random Forest Regressor (scikit-learn)",
+        "task": "Regresión supervisada",
+        "target": "Minutos que faltan para que el bus llegue a cada parada siguiente",
+        "features": stop_eta.FEATURE_NAMES,
+        "params": {},
+        "training_samples": 0,
+        "real_trips": 0,
+        "simulated_trips": 0,
+        "trained_at": None,
+        "metrics": None,
+        "feature_importance": [],
+    }
+    if bundle is not None:
+        for key in ("params", "real_trips", "simulated_trips", "trained_at", "metrics", "feature_importance"):
+            section[key] = bundle.get(key, section[key])
+        section["training_samples"] = bundle.get("samples", 0)
+    return section
+
+
 def model_summary(db: Session) -> dict[str, Any]:
     now = time.monotonic()
     if _cache["value"] is not None and now - _cache["at"] < CACHE_SECONDS:
@@ -161,6 +189,7 @@ def model_summary(db: Session) -> dict[str, Any]:
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "delay_model": _delay_section(db),
         "anomaly_model": _anomaly_section(db),
+        "stop_eta_model": _stop_eta_section(),
     }
     _cache.update(at=now, value=value)
     return value

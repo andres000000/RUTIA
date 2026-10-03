@@ -54,8 +54,11 @@ def _load_anomaly_model():
 def clear_model_cache() -> None:
     """Se usa en las pruebas automatizadas después de entrenar un modelo nuevo,
     para que `predict.py` no siga usando una versión vieja cacheada en memoria."""
+    from app.ml.stop_eta import load_bundle  # import local: evita un ciclo al cargar módulos
+
     _load_delay_model.cache_clear()
     _load_anomaly_model.cache_clear()
+    load_bundle.cache_clear()
 
 
 @dataclass

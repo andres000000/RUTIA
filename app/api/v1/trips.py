@@ -10,12 +10,21 @@ from app.api.deps import get_current_tenant_id, require_roles
 from app.api.v1.routes import build_route_path
 from app.core.database import get_db
 from app.ml.predict import predict_trip_duration_minutes
+from app.ml.stop_eta import predict_stop_etas
 from app.models.gps_position import GPSPosition
 from app.models.route import Route
 from app.models.trip import Trip, TripStatus
 from app.models.user import Role, User
 from app.models.vehicle import Vehicle
-from app.schemas.trip import GPSPositionRead, TripCreate, TripEtaRead, TripRead, TripTrackRead
+from app.schemas.trip import (
+    GPSPositionRead,
+    StopEtaRead,
+    TripCreate,
+    TripEtaRead,
+    TripRead,
+    TripStopEtasRead,
+    TripTrackRead,
+)
 from app.services.routing import haversine_m
 
 router = APIRouter(prefix="/trips", tags=["trips"])
@@ -297,4 +306,39 @@ def get_trip_track(
         off_route_pct=off_route_pct,
         off_route_threshold_m=OFF_ROUTE_THRESHOLD_M,
         planned=planned,
+    )
+
+
+@router.get("/{trip_id}/stop-etas", response_model=TripStopEtasRead)
+def get_trip_stop_etas(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant_id),
+) -> TripStopEtasRead:
+    """Llegada estimada a cada parada que le falta al bus (Fase 3). Abierto a
+    todos los roles del colegio, igual que las paradas y el ETA del viaje: la
+    app del padre se queda solo con la parada de su hijo."""
+    trip = _get_owned_trip(db, tenant_id, trip_id)
+    etas = predict_stop_etas(db, trip)
+    return TripStopEtasRead(
+        trip_id=trip.id,
+        available=etas.available,
+        message=etas.message,
+        source=etas.source,
+        last_position_at=etas.last_position_at,
+        stops=[
+            StopEtaRead(
+                stop_id=e.stop.id,
+                name=e.stop.name,
+                order_index=e.stop.order_index,
+                student_id=e.stop.student_id,
+                status=e.status,
+                arrived_at=e.arrived_at,
+                eta_at=e.eta_at,
+                eta_minutes=e.eta_minutes,
+                remaining_distance_m=e.remaining_distance_m,
+                stops_before=e.stops_before,
+            )
+            for e in etas.stops
+        ],
     )

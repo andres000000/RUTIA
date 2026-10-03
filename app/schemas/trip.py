@@ -70,3 +70,36 @@ class TripTrackRead(BaseModel):
     off_route_pct: float | None = None
     off_route_threshold_m: float
     planned: RoutePathRead
+
+
+class StopEtaRead(BaseModel):
+    """Una parada del viaje con su estado y, si falta, la llegada estimada.
+
+    `status`: "passed" (el bus ya llegó, ver `arrived_at`), "skipped" (quedó
+    atrás sin que el GPS pasara por ella) o "upcoming" (falta). `eta_minutes`
+    son minutos desde AHORA; `eta_at` la hora estimada de llegada."""
+
+    stop_id: int
+    name: str
+    order_index: int
+    student_id: int | None = None
+    status: str
+    arrived_at: datetime | None = None
+    eta_at: datetime | None = None
+    eta_minutes: float | None = None
+    remaining_distance_m: float | None = None
+    stops_before: int | None = None
+
+
+class TripStopEtasRead(BaseModel):
+    """ETA por parada (Fase 3). `available` es False cuando todavía no se
+    puede estimar (viaje sin empezar o sin GPS) y `message` dice por qué.
+    `source`: "model" (modelo de IA entrenado) o "heuristic" (regla fija de
+    respaldo: distancia a velocidad promedio + tiempo por parada)."""
+
+    trip_id: int
+    available: bool
+    message: str | None = None
+    source: str | None = None
+    last_position_at: datetime | None = None
+    stops: list[StopEtaRead]
