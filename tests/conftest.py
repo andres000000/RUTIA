@@ -2,7 +2,11 @@ import os
 
 # La URL de la DB de pruebas se fija ANTES de importar app.core.config, para que
 # Settings la tome vía variable de entorno y nunca se toquen los datos de desarrollo.
-os.environ["DATABASE_URL"] = "postgresql+psycopg://rutia:rutia_dev_password@localhost:5432/rutia_test"
+# TEST_DATABASE_URL permite correr las pruebas DENTRO del contenedor de Docker,
+# donde la base no está en "localhost" sino en el servicio "db".
+os.environ["DATABASE_URL"] = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql+psycopg://rutia:rutia_dev_password@localhost:5432/rutia_test"
+)
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,6 +45,19 @@ def _capture_otp_codes(monkeypatch):
     monkeypatch.setattr("app.services.auth_codes.send_otp_email", fake_send_otp_email)
     yield
     otp_capture.SENT_CODES.clear()
+
+
+@pytest.fixture(autouse=True)
+def _block_osrm_network(monkeypatch):
+    """Ninguna prueba debe depender del servidor público de OSRM: por defecto
+    se simula que no responde (el servicio cae a líneas rectas). Las pruebas
+    que necesitan una respuesta de OSRM la simulan explícitamente."""
+
+    def offline_get(*args, **kwargs):
+        raise ConnectionError("OSRM deshabilitado en las pruebas")
+
+    monkeypatch.setattr("app.services.routing.httpx.get", offline_get)
+    yield
 
 
 @pytest.fixture

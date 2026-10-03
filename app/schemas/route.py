@@ -17,6 +17,47 @@ class StopCreate(BaseModel):
     geofence_radius_m: int = Field(100, ge=10, le=2000)
 
 
+class StopUpdate(BaseModel):
+    """Edición parcial de una parada (el orden se cambia aparte, con
+    `StopOrderUpdate`, porque mover una parada afecta a todas las demás)."""
+
+    name: str | None = None
+    location: PointIn | None = None
+    geofence_radius_m: int | None = Field(None, ge=10, le=2000)
+
+
+class StopOrderUpdate(BaseModel):
+    """Lista COMPLETA de ids de paradas de la ruta, en el orden nuevo."""
+
+    stop_ids: list[int]
+
+
+class RoutePathRead(BaseModel):
+    """Trazado de la ruta para dibujarlo en el mapa.
+
+    `coordinates` va en orden [lon, lat] (GeoJSON). `source` dice de dónde salió:
+    "osrm" (por calles reales), "straight_line" (OSRM no respondió: líneas
+    rectas entre paradas) o "none" (la ruta tiene menos de 2 paradas)."""
+
+    route_id: int
+    coordinates: list[list[float]]
+    distance_m: float
+    source: str
+
+
+class RouteOptimizationRead(BaseModel):
+    """Propuesta de mejor orden de paradas. NO cambia nada por sí sola: el
+    panel la muestra y, si el admin la acepta, la aplica con `PUT .../stops/order`."""
+
+    route_id: int
+    current_stop_ids: list[int]
+    proposed_stop_ids: list[int]
+    current_distance_m: float
+    proposed_distance_m: float
+    changed: bool
+    source: str  # "osrm" | "unchanged"
+
+
 class StopRead(BaseModel):
     id: int
     route_id: int
