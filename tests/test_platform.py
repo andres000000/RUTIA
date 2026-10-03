@@ -25,9 +25,16 @@ def _bootstrap_tenant(client, name, admin_email, admin_password):
 
 
 def _platform_login(client) -> str:
+    """Login completo de operador: clave + código de 6 dígitos (2FA)."""
     resp = client.post("/api/v1/platform/login", json={"platform_key": settings.PLATFORM_BOOTSTRAP_KEY})
     assert resp.status_code == 200, resp.text
-    return resp.json()["access_token"]
+    challenge_id = resp.json()["challenge_id"]
+    verify = client.post(
+        "/api/v1/platform/verify-login",
+        json={"challenge_id": challenge_id, "code": otp_capture.last_code_for("platform")},
+    )
+    assert verify.status_code == 200, verify.text
+    return verify.json()["access_token"]
 
 
 def test_platform_login_rejects_wrong_key(client):
@@ -35,9 +42,58 @@ def test_platform_login_rejects_wrong_key(client):
     assert resp.status_code == 401
 
 
-def test_platform_login_accepts_correct_key(client):
+def test_platform_login_accepts_correct_key_and_code(client):
     token = _platform_login(client)
     assert token
+    resp = client.get("/api/v1/platform/tenants", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+
+def test_platform_key_alone_no_longer_gives_a_token(client):
+    """La clave sola ya no basta: el primer paso solo envía el código."""
+    resp = client.post("/api/v1/platform/login", json={"platform_key": settings.PLATFORM_BOOTSTRAP_KEY})
+    body = resp.json()
+    assert body["requires_verification"] is True
+    assert "access_token" not in body
+    assert body["challenge_id"]
+
+
+def test_platform_wrong_code_and_code_reuse_are_rejected(client):
+    resp = client.post("/api/v1/platform/login", json={"platform_key": settings.PLATFORM_BOOTSTRAP_KEY})
+    challenge_id = resp.json()["challenge_id"]
+    code = otp_capture.last_code_for("platform")
+    wrong = "000000" if code != "000000" else "111111"
+
+    bad = client.post("/api/v1/platform/verify-login", json={"challenge_id": challenge_id, "code": wrong})
+    assert bad.status_code == 400
+    bad_id = client.post("/api/v1/platform/verify-login", json={"challenge_id": "otro", "code": code})
+    assert bad_id.status_code == 400
+
+    ok = client.post("/api/v1/platform/verify-login", json={"challenge_id": challenge_id, "code": code})
+    assert ok.status_code == 200
+    # De un solo uso.
+    again = client.post("/api/v1/platform/verify-login", json={"challenge_id": challenge_id, "code": code})
+    assert again.status_code == 400
+
+
+def test_platform_code_dies_after_max_attempts(client):
+    resp = client.post("/api/v1/platform/login", json={"platform_key": settings.PLATFORM_BOOTSTRAP_KEY})
+    challenge_id = resp.json()["challenge_id"]
+    code = otp_capture.last_code_for("platform")
+    wrong = "000000" if code != "000000" else "111111"
+    for _ in range(settings.AUTH_CODE_MAX_ATTEMPTS):
+        client.post("/api/v1/platform/verify-login", json={"challenge_id": challenge_id, "code": wrong})
+    late = client.post("/api/v1/platform/verify-login", json={"challenge_id": challenge_id, "code": code})
+    assert late.status_code == 400
+
+
+def test_platform_locks_after_repeated_wrong_keys(client):
+    for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS - 1):
+        assert client.post("/api/v1/platform/login", json={"platform_key": "mala"}).status_code == 401
+    assert client.post("/api/v1/platform/login", json={"platform_key": "mala"}).status_code == 423
+    # Bloqueado: ni siquiera la clave correcta entra mientras dure el bloqueo.
+    resp = client.post("/api/v1/platform/login", json={"platform_key": settings.PLATFORM_BOOTSTRAP_KEY})
+    assert resp.status_code == 423
 
 
 def test_platform_endpoints_reject_a_normal_admin_token(client):

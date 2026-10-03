@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     # alta un colegio nuevo con su primer usuario ADMIN.
     PLATFORM_BOOTSTRAP_KEY: str = "change-this-bootstrap-key"
 
+    # Segundo factor del operador de plataforma: después de la clave se pide
+    # un código de 6 dígitos que se envía a este correo. Sin SMTP (o sin este
+    # correo), igual que con el ADMIN de un colegio, el código queda en el log
+    # del servidor.
+    PLATFORM_OPERATOR_EMAIL: str = ""
+    # La sesión del operador dura menos que la de un ADMIN (480 min): su
+    # token da acceso a todos los colegios.
+    PLATFORM_TOKEN_EXPIRE_MINUTES: int = 120
+
     BACKEND_CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:19006",

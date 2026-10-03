@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.services import platform_auth
 from tests import otp_capture
 
 engine = create_engine(os.environ["DATABASE_URL"])
@@ -43,7 +44,16 @@ def _capture_otp_codes(monkeypatch):
         otp_capture.SENT_CODES.append((to_email, code, purpose))
 
     monkeypatch.setattr("app.services.auth_codes.send_otp_email", fake_send_otp_email)
+
+    # Código del operador de plataforma: se captura con el destinatario
+    # "platform" (no tiene un correo de usuario propio).
+    def fake_send_platform_otp_email(to_email, code):
+        otp_capture.SENT_CODES.append(("platform", code, "PLATFORM_2FA"))
+
+    monkeypatch.setattr("app.services.platform_auth.send_platform_otp_email", fake_send_platform_otp_email)
+    platform_auth.reset_state()
     yield
+    platform_auth.reset_state()
     otp_capture.SENT_CODES.clear()
 
 

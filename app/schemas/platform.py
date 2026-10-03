@@ -11,6 +11,21 @@ class PlatformLoginRequest(BaseModel):
     platform_key: str = Field(..., min_length=1)
 
 
+class PlatformLoginChallenge(BaseModel):
+    """Primer paso del login de operador: la clave fue correcta y se envió un
+    código. `sent_to` es el correo enmascarado (o None si no hay correo de
+    operador configurado y el código solo quedó en el log del servidor)."""
+
+    requires_verification: bool = True
+    challenge_id: str
+    sent_to: str | None = None
+
+
+class PlatformVerifyRequest(BaseModel):
+    challenge_id: str = Field(..., min_length=1)
+    code: str = Field(..., min_length=6, max_length=6)
+
+
 class PlatformTenantSummary(TenantRead):
     """Un colegio visto desde el panel del operador de plataforma, con
     algunas cifras rápidas para que la tarjeta de cada colegio diga algo útil

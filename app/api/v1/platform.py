@@ -14,8 +14,14 @@ probado. "Entrar" a un colegio (`/platform/tenants/{id}/enter`) no reemplaza
 ni evita esas protecciones del lado del colegio -- lo que hace es iniciar una
 sesión de ADMIN de ese colegio en nombre del operador de plataforma, quien ya
 demostró tener la clave más sensible de todas (la que puede crear colegios
-enteros). Por eso esa sesión no vuelve a pedir el código de 2FA del ADMIN de
-ese colegio en particular.
+enteros) Y pasó su propio segundo factor. Por eso esa sesión no vuelve a
+pedir el código de 2FA del ADMIN de ese colegio en particular.
+
+Login del operador en dos pasos (2FA, igual o más estricto que el ADMIN):
+`POST /platform/login` con la clave -> envía un código de 6 dígitos a
+`PLATFORM_OPERATOR_EMAIL` -> `POST /platform/verify-login` con el código ->
+token de operador (dura `PLATFORM_TOKEN_EXPIRE_MINUTES`, menos que el de un
+ADMIN). Ver `app/services/platform_auth.py`.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,22 +38,46 @@ from app.models.user import Role, User
 from app.models.vehicle import Vehicle
 from app.schemas.platform import (
     PlatformEnterTenantResponse,
+    PlatformLoginChallenge,
     PlatformLoginRequest,
     PlatformTenantSummary,
+    PlatformVerifyRequest,
 )
 from app.schemas.tenant import TenantBootstrapRequest, TenantBootstrapResponse, TenantRead
 from app.schemas.auth import TokenResponse
+from app.services import platform_auth
 from app.services.tenants import TenantEmailAlreadyRegistered, create_tenant_with_admin
 
 router = APIRouter(prefix="/platform", tags=["platform"])
 
 
-@router.post("/login", response_model=TokenResponse)
-def platform_login(payload: PlatformLoginRequest) -> TokenResponse:
-    if payload.platform_key != settings.PLATFORM_BOOTSTRAP_KEY:
+@router.post("/login", response_model=PlatformLoginChallenge)
+def platform_login(payload: PlatformLoginRequest) -> PlatformLoginChallenge:
+    """Paso 1: clave de plataforma. Ya NO devuelve el token: envía el código."""
+    try:
+        challenge_id = platform_auth.start_login(payload.platform_key)
+    except platform_auth.PlatformLocked as exc:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Acceso de operador bloqueado por varios intentos fallidos. Intenta de nuevo en {exc.minutes} minuto(s).",
+        )
+    except platform_auth.InvalidPlatformKey:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Clave de plataforma inválida")
 
-    token = create_access_token(subject="platform", extra_claims={"scope": "SUPER_ADMIN"})
+    email = settings.PLATFORM_OPERATOR_EMAIL
+    return PlatformLoginChallenge(challenge_id=challenge_id, sent_to=platform_auth.mask_email(email) if email else None)
+
+
+@router.post("/verify-login", response_model=TokenResponse)
+def platform_verify_login(payload: PlatformVerifyRequest) -> TokenResponse:
+    """Paso 2: código de 6 dígitos -> token de operador (sesión corta)."""
+    if not platform_auth.verify_code(payload.challenge_id, payload.code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Código inválido o vencido")
+    token = create_access_token(
+        subject="platform",
+        extra_claims={"scope": "SUPER_ADMIN"},
+        expire_minutes=settings.PLATFORM_TOKEN_EXPIRE_MINUTES,
+    )
     return TokenResponse(access_token=token)
 
 

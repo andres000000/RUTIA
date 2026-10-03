@@ -36,10 +36,16 @@ _INTRO_BY_PURPOSE = {
 }
 
 
-def _build_message(to_email: str, code: str, purpose: AuthCodePurpose) -> EmailMessage:
-    subject = _SUBJECT_BY_PURPOSE[purpose]
-    intro = _INTRO_BY_PURPOSE[purpose]
+# Operador de plataforma: no es un usuario (no tiene fila en `users` ni en
+# `auth_codes`), así que su código no pasa por AuthCodePurpose.
+PLATFORM_2FA_SUBJECT = "Código de acceso de operador de RUTIA"
+PLATFORM_2FA_INTRO = (
+    "Alguien ingresó la clave de plataforma de RUTIA (acceso a TODOS los colegios) y está intentando entrar "
+    "como operador."
+)
 
+
+def _build_message(to_email: str, code: str, subject: str, intro: str) -> EmailMessage:
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_USER}>"
@@ -83,16 +89,26 @@ def send_otp_email(to_email: str, code: str, purpose: AuthCodePurpose) -> None:
     fue así) pueden revisar el valor de retorno más adelante si hace falta;
     por ahora, para el alcance de este piloto, se prioriza que el flujo nunca
     se caiga por un problema de correo."""
-    if not settings.SMTP_USER or not settings.SMTP_APP_PASSWORD:
+    _send(to_email, code, _SUBJECT_BY_PURPOSE[purpose], _INTRO_BY_PURPOSE[purpose], purpose.value)
+
+
+def send_platform_otp_email(to_email: str, code: str) -> None:
+    """Código del segundo factor del operador de plataforma (mismo formato y
+    mismo respaldo en el log que el de un ADMIN de colegio)."""
+    _send(to_email, code, PLATFORM_2FA_SUBJECT, PLATFORM_2FA_INTRO, "PLATFORM_2FA")
+
+
+def _send(to_email: str, code: str, subject: str, intro: str, label: str) -> None:
+    if not settings.SMTP_USER or not settings.SMTP_APP_PASSWORD or not to_email:
         logger.warning(
-            "SMTP no configurado -- código de %s para %s no se envió por correo: %s",
-            purpose.value,
-            to_email,
+            "SMTP no configurado (o sin destinatario) -- código de %s para %s no se envió por correo: %s",
+            label,
+            to_email or "(sin correo)",
             code,
         )
         return
 
-    message = _build_message(to_email, code, purpose)
+    message = _build_message(to_email, code, subject, intro)
     try:
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
             smtp.starttls()
