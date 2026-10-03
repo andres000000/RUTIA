@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_tenant_id, require_roles
@@ -38,7 +39,7 @@ def create_user(
     monitores y padres de familia. Siempre quedan en el mismo tenant que el admin
     que las crea (nunca se recibe tenant_id del cliente).
     """
-    existing = db.query(User).filter(User.email == payload.email).first()
+    existing = db.query(User).filter(func.lower(User.email) == payload.email).first()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El correo ya está registrado")
 
@@ -73,7 +74,26 @@ def update_user(
     `is_active` en el login).
     """
     user = _get_owned_user(db, tenant_id, user_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+
+    new_email = changes.pop("email", None)
+    if new_email is not None and new_email != user.email.lower():
+        taken = (
+            db.query(User).filter(func.lower(User.email) == new_email, User.id != user.id).first()
+        )
+        if taken is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El correo ya está registrado")
+        user.email = new_email
+
+    new_password = changes.pop("password", None)
+    if new_password is not None:
+        user.hashed_password = hash_password(new_password)
+        # Contraseña nueva puesta por el admin: se levanta cualquier bloqueo
+        # por intentos fallidos, para que la persona pueda entrar de una vez.
+        user.failed_login_attempts = 0
+        user.locked_until = None
+
+    for field, value in changes.items():
         setattr(user, field, value)
     db.commit()
     db.refresh(user)

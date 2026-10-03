@@ -1,10 +1,11 @@
 from pydantic import BaseModel, EmailStr, Field
 
 from app.models.user import Role
+from app.schemas.common import NormalizedEmail
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     password: str
 
 
@@ -28,16 +29,16 @@ class LoginResult(BaseModel):
 
 
 class VerifyLoginRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     code: str = Field(..., min_length=6, max_length=6)
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
 
 
 class ResetPasswordRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     code: str = Field(..., min_length=6, max_length=6)
     new_password: str = Field(..., min_length=8)
 

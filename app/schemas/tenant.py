@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.common import NormalizedEmail
+
 
 class TenantRead(BaseModel):
     id: int
@@ -19,7 +21,7 @@ class TenantBootstrapRequest(BaseModel):
     nit: str | None = None
     address: str | None = None
     phone: str | None = None
-    admin_email: EmailStr
+    admin_email: NormalizedEmail
     admin_password: str = Field(..., min_length=8)
     admin_full_name: str
 

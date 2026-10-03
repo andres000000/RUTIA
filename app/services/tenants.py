@@ -15,6 +15,7 @@ distinto por accidente.
 
 from __future__ import annotations
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
@@ -28,7 +29,7 @@ class TenantEmailAlreadyRegistered(Exception):
 
 
 def create_tenant_with_admin(db: Session, payload: TenantBootstrapRequest) -> Tenant:
-    existing = db.query(User).filter(User.email == payload.admin_email).first()
+    existing = db.query(User).filter(func.lower(User.email) == payload.admin_email).first()
     if existing is not None:
         raise TenantEmailAlreadyRegistered(payload.admin_email)
 

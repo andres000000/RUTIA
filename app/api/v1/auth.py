@@ -27,6 +27,7 @@ Diseño de seguridad (resumen para la sustentación):
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -67,7 +68,7 @@ def _lockout_message(user: User) -> str:
 
 @router.post("/login", response_model=LoginResult)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResult:
-    user = db.query(User).filter(User.email == payload.email).first()
+    user = db.query(User).filter(func.lower(User.email) == payload.email).first()
     if user is None:
         raise _INVALID_CREDENTIALS
 
@@ -105,7 +106,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResult:
 
 @router.post("/verify-login", response_model=TokenResponse)
 def verify_login(payload: VerifyLoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    user = db.query(User).filter(User.email == payload.email).first()
+    user = db.query(User).filter(func.lower(User.email) == payload.email).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Código inválido o vencido")
 
@@ -120,7 +121,7 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
     generic_message = MessageResponse(
         message="Si ese correo está registrado, te enviamos un código de recuperación."
     )
-    user = db.query(User).filter(User.email == payload.email).first()
+    user = db.query(User).filter(func.lower(User.email) == payload.email).first()
     if user is not None and user.is_active:
         issue_code(db, user, AuthCodePurpose.PASSWORD_RESET)
     # Misma respuesta exista o no la cuenta: así nadie puede usar este
@@ -133,7 +134,7 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
     invalid_code_error = HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Código inválido o vencido"
     )
-    user = db.query(User).filter(User.email == payload.email).first()
+    user = db.query(User).filter(func.lower(User.email) == payload.email).first()
     if user is None:
         raise invalid_code_error
 
